@@ -15,11 +15,26 @@
         ];
 
         // --- GLOBAL STATE ---
+        let currentUser = null;
         let userId; 
         let currentBookingDate = new Date();
         let allBookings = [];
         let allLogs = [];
         const LOCAL_STORAGE_KEY = 'resource_booking_data_v2';
+        const AUTH_STORAGE_KEY = 'booking_system_auth';
+        const USERS_STORAGE_KEY = 'booking_system_users';
+        
+        // --- DEMO USERS (Initialize on first load) ---
+        function initializeDemoUsers() {
+            const existingUsers = localStorage.getItem(USERS_STORAGE_KEY);
+            if (!existingUsers) {
+                const demoUsers = {
+                    'demo': { password: 'demo123', email: 'demo@booking.local' },
+                    'admin': { password: 'admin123', email: 'admin@booking.local' },
+                };
+                localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(demoUsers));
+            }
+        }
         
         // --- TAILWIND STYLES ---
         const tableHeaderStyles = "p-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider";
@@ -33,17 +48,60 @@
         const activeNavStyles = "bg-indigo-50 text-indigo-600 border-indigo-500 active-nav";
         const inactiveNavStyles = "text-slate-500 hover:bg-slate-50 hover:text-slate-800 border-transparent";
         
-        // --- AUTH ---
-        function getLocalUserId() {
-            let id = localStorage.getItem('booking_user_id');
-            if (!id) {
-                id = 'user-' + Math.random().toString(36).substring(2, 10);
-                localStorage.setItem('booking_user_id', id);
+        // --- LOGIN SYSTEM ---
+        function loginUser(username, password) {
+            const usersJson = localStorage.getItem(USERS_STORAGE_KEY);
+            if (!usersJson) {
+                showToast("No users found. System not initialized.", true);
+                return false;
             }
-            userId = id;
+            
+            const users = JSON.parse(usersJson);
+            const user = users[username];
+            
+            if (!user || user.password !== password) {
+                showToast("Invalid username or password.", true);
+                return false;
+            }
+            
+            currentUser = { username: username, loginTime: new Date().toISOString() };
+            userId = username;
+            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser));
+            showToast(`Welcome, ${username}!`);
+            return true;
+        }
+        
+        function logoutUser() {
+            if (currentUser) {
+                createLogEntry('User Logout', `${currentUser.username} logged out`);
+            }
+            currentUser = null;
+            userId = null;
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            location.reload();
+        }
+        
+        function checkAuthStatus() {
+            const storedAuth = localStorage.getItem(AUTH_STORAGE_KEY);
+            if (storedAuth) {
+                currentUser = JSON.parse(storedAuth);
+                userId = currentUser.username;
+                return true;
+            }
+            return false;
+        }
+        
+        function showLoginPage() {
+            document.getElementById('loginPage').classList.remove('hidden');
+            document.getElementById('appContainer').classList.add('hidden');
+        }
+        
+        function showAppPage() {
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('appContainer').classList.remove('hidden');
             document.getElementById('userIdDisplay').textContent = userId;
         }
-
+        
         // --- PERSISTENCE ---
         function loadData() {
             const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -94,7 +152,10 @@
         function formatDateForInput(date) { return date.toISOString().split('T')[0]; }
         
         function formatTimeForInput(date) {
-            return date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0');
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = Math.round(date.getMinutes() / 30) * 30;
+            const finalMinutes = minutes === 60 ? '00' : minutes.toString().padStart(2, '0');
+            return `${hours}:${finalMinutes}`;
         }
 
         function showToast(message, isError = false) {
@@ -309,6 +370,25 @@
         }
 
         function setupEventListeners() {
+            // LOGIN FORM SUBMIT
+            document.getElementById('loginForm').onsubmit = (e) => {
+                e.preventDefault();
+                const username = document.getElementById('loginUsername').value.trim();
+                const password = document.getElementById('loginPassword').value.trim();
+                
+                if (loginUser(username, password)) {
+                    loadData();
+                    showAppPage();
+                    setupNavigation();
+                    setupDelegatedListeners();
+                    reloadDataAndRender();
+                    document.getElementById('loginForm').reset();
+                }
+            };
+            
+            // LOGOUT BUTTON
+            document.getElementById('logoutBtn').addEventListener('click', logoutUser);
+            
             // Setup Resource Select
             const select = document.getElementById('bookingResource');
             RESOURCES.forEach(r => {
@@ -325,6 +405,29 @@
             document.getElementById('openBookingModalBtn').onclick = () => {
                 document.getElementById('bookingForm').reset();
                 document.getElementById('bookingDate').value = formatDateForInput(currentBookingDate);
+                
+                // Populate time dropdowns with hourly intervals (8:00 to 18:00)
+                const startSelect = document.getElementById('bookingStartTime');
+                const endSelect = document.getElementById('bookingEndTime');
+                
+                startSelect.innerHTML = '<option value="">Select start time...</option>';
+                endSelect.innerHTML = '<option value="">Select end time...</option>';
+                
+                for (let hour = 8; hour <= 18; hour++) {
+                    const timeStr = `${hour.toString().padStart(2, '0')}:00`;
+                    const timeLabel = new Date(0, 0, 0, hour, 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                    
+                    const opt1 = document.createElement('option');
+                    opt1.value = timeStr;
+                    opt1.textContent = timeLabel;
+                    startSelect.appendChild(opt1);
+                    
+                    const opt2 = document.createElement('option');
+                    opt2.value = timeStr;
+                    opt2.textContent = timeLabel;
+                    endSelect.appendChild(opt2);
+                }
+                
                 openModal('bookingModal');
             };
 
@@ -336,25 +439,34 @@
                 const sStr = document.getElementById('bookingStartTime').value;
                 const eStr = document.getElementById('bookingEndTime').value;
                 
+                if (!sStr || !eStr) {
+                    return showToast("Please select both start and end times.", true);
+                }
+                
                 const start = new Date(d + 'T' + sStr);
                 const end = new Date(d + 'T' + eStr);
                 
                 if (end <= start) return showToast("End time must be after start time.", true);
                 
+                const startMs = start.getTime();
+                const endMs = end.getTime();
+                
                 // Conflict Check
-                const hasConflict = allBookings.find(b => b.resourceId === resId && (start.getTime() < b.endTime && end.getTime() > b.startTime));
+                const hasConflict = allBookings.find(b => b.resourceId === resId && (startMs < b.endTime && endMs > b.startTime));
                 if (hasConflict) return showToast("This time slot is already reserved.", true);
 
                 allBookings.push({ 
                     id: 'book-' + Date.now(), 
                     resourceId: resId, 
-                    startTime: start.getTime(), 
-                    endTime: end.getTime(), 
-                    bookerId: userId 
+                    startTime: startMs, 
+                    endTime: endMs, 
+                    bookerId: userId,
+                    createdAt: new Date().toISOString(),
+                    status: 'confirmed'
                 });
                 
                 saveData();
-                createLogEntry(`New Booking`, `${resId} for ${formatTimestamp(start.getTime())}`);
+                createLogEntry(`New Booking`, `${resId} for ${formatTimestamp(startMs)}`);
                 showToast("Booking confirmed!");
                 closeModal();
                 reloadDataAndRender();
@@ -373,9 +485,17 @@
 
         // --- INIT ---
         document.addEventListener('DOMContentLoaded', () => {
-            getLocalUserId();
-            setupNavigation();
-            setupEventListeners();
-            setupDelegatedListeners(); // Setup the delegate once
-            reloadDataAndRender(); 
+            initializeDemoUsers();
+            
+            if (checkAuthStatus()) {
+                showAppPage();
+                loadData();
+                setupNavigation();
+                setupEventListeners();
+                setupDelegatedListeners();
+                reloadDataAndRender();
+            } else {
+                showLoginPage();
+                setupEventListeners();
+            }
         });
