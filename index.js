@@ -15,26 +15,11 @@
         ];
 
         // --- GLOBAL STATE ---
-        let currentUser = null;
-        let userId; 
+        let userId = 'user'; 
         let currentBookingDate = new Date();
         let allBookings = [];
         let allLogs = [];
         const LOCAL_STORAGE_KEY = 'resource_booking_data_v2';
-        const AUTH_STORAGE_KEY = 'booking_system_auth';
-        const USERS_STORAGE_KEY = 'booking_system_users';
-        
-        // --- DEMO USERS (Initialize on first load) ---
-        function initializeDemoUsers() {
-            const existingUsers = localStorage.getItem(USERS_STORAGE_KEY);
-            if (!existingUsers) {
-                const demoUsers = {
-                    'demo': { password: 'demo123', email: 'demo@booking.local' },
-                    'admin': { password: 'admin123', email: 'admin@booking.local' },
-                };
-                localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(demoUsers));
-            }
-        }
         
         // --- TAILWIND STYLES ---
         const tableHeaderStyles = "p-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider";
@@ -47,60 +32,6 @@
         const navLinkBase = "nav-link flex items-center py-3.5 px-6 text-sm font-semibold border-l-4 transition duration-200";
         const activeNavStyles = "bg-indigo-50 text-indigo-600 border-indigo-500 active-nav";
         const inactiveNavStyles = "text-slate-500 hover:bg-slate-50 hover:text-slate-800 border-transparent";
-        
-        // --- LOGIN SYSTEM ---
-        function loginUser(username, password) {
-            const usersJson = localStorage.getItem(USERS_STORAGE_KEY);
-            if (!usersJson) {
-                showToast("No users found. System not initialized.", true);
-                return false;
-            }
-            
-            const users = JSON.parse(usersJson);
-            const user = users[username];
-            
-            if (!user || user.password !== password) {
-                showToast("Invalid username or password.", true);
-                return false;
-            }
-            
-            currentUser = { username: username, loginTime: new Date().toISOString() };
-            userId = username;
-            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser));
-            showToast(`Welcome, ${username}!`);
-            return true;
-        }
-        
-        function logoutUser() {
-            if (currentUser) {
-                createLogEntry('User Logout', `${currentUser.username} logged out`);
-            }
-            currentUser = null;
-            userId = null;
-            localStorage.removeItem(AUTH_STORAGE_KEY);
-            location.reload();
-        }
-        
-        function checkAuthStatus() {
-            const storedAuth = localStorage.getItem(AUTH_STORAGE_KEY);
-            if (storedAuth) {
-                currentUser = JSON.parse(storedAuth);
-                userId = currentUser.username;
-                return true;
-            }
-            return false;
-        }
-        
-        function showLoginPage() {
-            document.getElementById('loginPage').classList.remove('hidden');
-            document.getElementById('appContainer').classList.add('hidden');
-        }
-        
-        function showAppPage() {
-            document.getElementById('loginPage').classList.add('hidden');
-            document.getElementById('appContainer').classList.remove('hidden');
-            document.getElementById('userIdDisplay').textContent = userId;
-        }
         
         // --- PERSISTENCE ---
         function loadData() {
@@ -142,7 +73,7 @@
 
         function formatTimestamp(ts) {
             const date = new Date(ts);
-            return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true });
+            return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
         }
         
         function formatDateForBooking(date) {
@@ -153,9 +84,8 @@
         
         function formatTimeForInput(date) {
             const hours = date.getHours().toString().padStart(2, '0');
-            const minutes = Math.round(date.getMinutes() / 30) * 30;
-            const finalMinutes = minutes === 60 ? '00' : minutes.toString().padStart(2, '0');
-            return `${hours}:${finalMinutes}`;
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            return `${hours}:${minutes}`;
         }
 
         function showToast(message, isError = false) {
@@ -243,12 +173,12 @@
                 if (current) {
                     statusText = "Occupied";
                     statusClass = "text-red-600";
-                    nextText = `Until ${new Date(current.endTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+                    nextText = `Until ${new Date(current.endTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12: false})}`;
                 } else {
                     statusText = "Available";
                     statusClass = "text-green-600";
                     const next = bookings.filter(b => b.startTime > now.getTime()).sort((a,b)=>a.startTime-b.startTime)[0];
-                    nextText = next ? `Next: ${new Date(next.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}` : "Free for today";
+                    nextText = next ? `Next: ${new Date(next.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12: false})}` : "Free for today";
                 }
 
                 card.innerHTML = `
@@ -308,8 +238,11 @@
                 for (let hour = 8; hour < 18; hour++) {
                     const slot = document.createElement('div');
                     const timeStart = new Date(currentBookingDate); timeStart.setHours(hour, 0, 0, 0);
-                    const timeLabel = timeStart.toLocaleTimeString([], { hour: 'numeric', hour12: true });
-                    const b = filteredBookings.find(x => new Date(x.startTime).getHours() === hour);
+                    const timeEnd = new Date(currentBookingDate); timeEnd.setHours(hour + 1, 0, 0, 0);
+                    const timeLabel = timeStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    
+                    // Find booking that overlaps with this hour slot
+                    const b = filteredBookings.find(x => x.startTime < timeEnd.getTime() && x.endTime > timeStart.getTime());
                     
                     if (b) {
                         slot.className = "p-3 bg-red-50 border border-red-100 rounded-lg flex justify-between items-center";
@@ -358,7 +291,7 @@
                     const id = target.dataset.id;
                     const booking = allBookings.find(x => x.id === id);
                     
-                    if (booking && confirm(`Cancel booking for ${booking.resourceId} at ${new Date(booking.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}?`)) {
+                    if (booking && confirm(`Cancel booking for ${booking.resourceId} at ${new Date(booking.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12: false})}?`)) {
                         allBookings = allBookings.filter(x => x.id !== id);
                         saveData();
                         createLogEntry(`Cancelled Booking`, `${booking.resourceId} at ${formatTimestamp(booking.startTime)}`);
@@ -370,25 +303,6 @@
         }
 
         function setupEventListeners() {
-            // LOGIN FORM SUBMIT
-            document.getElementById('loginForm').onsubmit = (e) => {
-                e.preventDefault();
-                const username = document.getElementById('loginUsername').value.trim();
-                const password = document.getElementById('loginPassword').value.trim();
-                
-                if (loginUser(username, password)) {
-                    loadData();
-                    showAppPage();
-                    setupNavigation();
-                    setupDelegatedListeners();
-                    reloadDataAndRender();
-                    document.getElementById('loginForm').reset();
-                }
-            };
-            
-            // LOGOUT BUTTON
-            document.getElementById('logoutBtn').addEventListener('click', logoutUser);
-            
             // Setup Resource Select
             const select = document.getElementById('bookingResource');
             RESOURCES.forEach(r => {
@@ -405,29 +319,6 @@
             document.getElementById('openBookingModalBtn').onclick = () => {
                 document.getElementById('bookingForm').reset();
                 document.getElementById('bookingDate').value = formatDateForInput(currentBookingDate);
-                
-                // Populate time dropdowns with hourly intervals (8:00 to 18:00)
-                const startSelect = document.getElementById('bookingStartTime');
-                const endSelect = document.getElementById('bookingEndTime');
-                
-                startSelect.innerHTML = '<option value="">Select start time...</option>';
-                endSelect.innerHTML = '<option value="">Select end time...</option>';
-                
-                for (let hour = 8; hour <= 18; hour++) {
-                    const timeStr = `${hour.toString().padStart(2, '0')}:00`;
-                    const timeLabel = new Date(0, 0, 0, hour, 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                    
-                    const opt1 = document.createElement('option');
-                    opt1.value = timeStr;
-                    opt1.textContent = timeLabel;
-                    startSelect.appendChild(opt1);
-                    
-                    const opt2 = document.createElement('option');
-                    opt2.value = timeStr;
-                    opt2.textContent = timeLabel;
-                    endSelect.appendChild(opt2);
-                }
-                
                 openModal('bookingModal');
             };
 
@@ -485,17 +376,9 @@
 
         // --- INIT ---
         document.addEventListener('DOMContentLoaded', () => {
-            initializeDemoUsers();
-            
-            if (checkAuthStatus()) {
-                showAppPage();
-                loadData();
-                setupNavigation();
-                setupEventListeners();
-                setupDelegatedListeners();
-                reloadDataAndRender();
-            } else {
-                showLoginPage();
-                setupEventListeners();
-            }
+            loadData();
+            setupNavigation();
+            setupEventListeners();
+            setupDelegatedListeners();
+            reloadDataAndRender();
         });
