@@ -15,7 +15,7 @@
         ];
 
         // --- GLOBAL STATE ---
-        let userId = 'user'; 
+        let userId = '';
         let currentBookingDate = new Date();
         let allBookings = [];
         let allLogs = [];
@@ -54,6 +54,7 @@
             renderLogsTable();
             renderBookingSchedule();
             renderDashboardStats();
+            renderBookingsList();
             applyTailwindStyles(); 
         }
 
@@ -107,8 +108,9 @@
             document.getElementById('modalBackdrop').classList.remove('active');
         }
 
-        function createLogEntry(activityType, details = "") {
-            allLogs.unshift({ id: 'log-' + Date.now(), timestamp: Date.now(), userId: userId, activityType: activityType, details: details });
+        function createLogEntry(activityType, details = "", logUserId = null) {
+            const uid = logUserId || userId;
+            allLogs.unshift({ id: 'log-' + Date.now(), timestamp: Date.now(), userId: uid, activityType: activityType, details: details });
             saveData();
             renderLogsTable();
             renderDashboardStats();
@@ -154,6 +156,38 @@
                     <td class="p-4 border-b border-slate-100 text-sm text-slate-500">${log.details || '-'}</td>
                 </tr>
             `).join('');
+        }
+
+        function renderBookingsList(filter = '') {
+            const tbody = document.getElementById('bookingsTableBody');
+            if (!tbody) return;
+
+            const rows = allBookings
+                .filter(b => !filter || (b.bookerId && b.bookerId.toLowerCase().includes(filter.toLowerCase())))
+                .map(b => {
+                    const res = RESOURCES.find(r => r.id === b.resourceId);
+                    const date = new Date(b.startTime).toLocaleDateString('en-GB');
+                    const start = new Date(b.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false});
+                    const end = new Date(b.endTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false});
+                    return `
+                        <tr class="hover:bg-slate-50 transition">
+                            <td class="p-4 border-b border-slate-100 text-sm">${res ? res.name : b.resourceId}</td>
+                            <td class="p-4 border-b border-slate-100 text-sm">${date}</td>
+                            <td class="p-4 border-b border-slate-100 text-sm">${start}</td>
+                            <td class="p-4 border-b border-slate-100 text-sm">${end}</td>
+                            <td class="p-4 border-b border-slate-100 text-sm font-semibold">${b.bookerId}</td>
+                            <td class="p-4 border-b border-slate-100 text-sm">
+                                <button class="btn-remove-booking bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded" data-id="${b.id}">Remove</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+            if (rows.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center p-8 text-slate-400 italic">No bookings found.</td></tr>`;
+            } else {
+                tbody.innerHTML = rows.join('');
+            }
         }
         
         function renderDashboardStats() {
@@ -204,7 +238,7 @@
                     <div class="p-2.5 bg-indigo-50 text-indigo-600 rounded-lg text-lg">📅</div>
                     <div>
                         <p class="text-sm font-bold text-slate-800">${log.activityType}</p>
-                        <p class="text-xs text-slate-500">${formatTimestamp(log.timestamp)}</p>
+                        <p class="text-xs text-slate-500">${formatTimestamp(log.timestamp)} • <span class="font-semibold text-slate-700">${log.userId}</span></p>
                     </div>
                 </li>
             `).join('');
@@ -212,6 +246,13 @@
         
         function renderBookingSchedule() {
             document.getElementById('bookingDateDisplay').textContent = formatDateForBooking(currentBookingDate);
+            // Hide 'previous day' button when viewing today's date
+            try {
+                const prevBtn = document.getElementById('prevDayBtn');
+                const now = new Date();
+                const isToday = now.getFullYear() === currentBookingDate.getFullYear() && now.getMonth() === currentBookingDate.getMonth() && now.getDate() === currentBookingDate.getDate();
+                if (prevBtn) prevBtn.style.display = isToday ? 'none' : '';
+            } catch (e) { /* ignore */ }
             const container = document.getElementById('schedules-container');
             container.innerHTML = '';
             
@@ -247,8 +288,8 @@
                     if (b) {
                         slot.className = "p-3 bg-red-50 border border-red-100 rounded-lg flex justify-between items-center";
                         slot.innerHTML = `
-                            <div><p class="font-bold text-red-900 text-sm">${timeLabel}</p><p class="text-[10px] text-red-700">Reserved: ${b.bookerId.substring(0, 6)}</p></div>
-                            <button class="btn-delete-booking text-[10px] font-bold text-red-600 bg-white px-2 py-1 rounded border border-red-200 hover:bg-red-50" data-id="${b.id}">Cancel</button>
+                            <div><p class="font-bold text-red-900 text-sm">${timeLabel}</p><p class="text-[10px] text-red-700">Reserved: ${b.bookerId.substring(0, 16)}</p></div>
+                            <button class="btn-delete-booking text-[10px] font-bold text-red-600 bg-white px-2 py-1 rounded border border-red-200 hover:bg-red-50" data-id="${b.id}" data-slot-hour="${hour}">Cancel</button>
                         `;
                     } else {
                         slot.className = "p-3 bg-white border border-slate-100 rounded-lg flex justify-between items-center hover:border-indigo-200 transition group";
@@ -278,26 +319,77 @@
                     const hr = parseInt(target.dataset.time);
                     const start = new Date(currentBookingDate); start.setHours(hr, 0, 0, 0);
                     const end = new Date(currentBookingDate); end.setHours(hr + 1, 0, 0, 0);
+                    // Prevent opening modal for past slots
+                    if (start.getTime() < Date.now()) {
+                        showToast('Cannot create bookings in the past.', true);
+                        return;
+                    }
                     
                     document.getElementById('bookingResource').value = resId;
                     document.getElementById('bookingDate').value = formatDateForInput(start);
                     document.getElementById('bookingStartTime').value = formatTimeForInput(start);
                     document.getElementById('bookingEndTime').value = formatTimeForInput(end);
+                    // Prefill booker name with current userId
+                    const bookerInput = document.getElementById('bookingBooker');
+                    if (bookerInput) bookerInput.value = userId || '';
                     openModal('bookingModal');
                 }
 
                 // Handle Cancel Click
                 if (target.classList.contains('btn-delete-booking')) {
                     const id = target.dataset.id;
-                    const booking = allBookings.find(x => x.id === id);
-                    
-                    if (booking && confirm(`Cancel booking for ${booking.resourceId} at ${new Date(booking.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12: false})}?`)) {
-                        allBookings = allBookings.filter(x => x.id !== id);
-                        saveData();
-                        createLogEntry(`Cancelled Booking`, `${booking.resourceId} at ${formatTimestamp(booking.startTime)}`);
-                        showToast("Booking cancelled.");
-                        reloadDataAndRender();
+                    const slotHour = target.dataset.slotHour ? parseInt(target.dataset.slotHour) : null;
+                    const bookingIndex = allBookings.findIndex(x => x.id === id);
+                    const booking = bookingIndex !== -1 ? allBookings[bookingIndex] : null;
+
+                    if (!booking || slotHour === null) return;
+
+                    const slotStart = new Date(currentBookingDate); slotStart.setHours(slotHour, 0, 0, 0);
+                    const slotEnd = new Date(currentBookingDate); slotEnd.setHours(slotHour + 1, 0, 0, 0);
+                    const slotStartMs = slotStart.getTime();
+                    const slotEndMs = slotEnd.getTime();
+
+                    if (!confirm(`Cancel booking for ${booking.resourceId} at ${slotStart.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12: false})}?`)) return;
+
+                    const bStart = booking.startTime;
+                    const bEnd = booking.endTime;
+
+                    // Case A: slot covers entire booking => remove booking
+                    if (slotStartMs <= bStart && slotEndMs >= bEnd) {
+                        allBookings.splice(bookingIndex, 1);
+                        createLogEntry(`Cancelled Booking`, `${booking.resourceId} at ${formatTimestamp(bStart)}`, booking.bookerId);
+
+                    // Case B: cancel at start portion => move booking start to slot end
+                    } else if (slotStartMs <= bStart && slotEndMs < bEnd) {
+                        allBookings[bookingIndex].startTime = slotEndMs;
+                        createLogEntry(`Cancelled Booking (start trimmed)`, `${booking.resourceId} at ${formatTimestamp(bStart)}`, booking.bookerId);
+
+                    // Case C: cancel at end portion => move booking end to slot start
+                    } else if (slotStartMs > bStart && slotEndMs >= bEnd) {
+                        allBookings[bookingIndex].endTime = slotStartMs;
+                        createLogEntry(`Cancelled Booking (end trimmed)`, `${booking.resourceId} at ${formatTimestamp(slotStartMs)}`, booking.bookerId);
+
+                    // Case D: slot in middle => split into two bookings
+                    } else if (slotStartMs > bStart && slotEndMs < bEnd) {
+                        // shorten original to end at slotStart
+                        allBookings[bookingIndex].endTime = slotStartMs;
+                        // create new booking for the right-hand portion
+                        const newBooking = {
+                            id: 'book-' + Date.now() + Math.random(),
+                            resourceId: booking.resourceId,
+                            startTime: slotEndMs,
+                            endTime: bEnd,
+                            bookerId: booking.bookerId,
+                            createdAt: new Date().toISOString(),
+                            status: booking.status || 'confirmed'
+                        };
+                        allBookings.push(newBooking);
+                        createLogEntry(`Cancelled Booking (split)`, `${booking.resourceId} at ${formatTimestamp(slotStartMs)}`, booking.bookerId);
                     }
+
+                    saveData();
+                    showToast("Booking updated.");
+                    reloadDataAndRender();
                 }
             });
         }
@@ -319,8 +411,84 @@
             document.getElementById('openBookingModalBtn').onclick = () => {
                 document.getElementById('bookingForm').reset();
                 document.getElementById('bookingDate').value = formatDateForInput(currentBookingDate);
+                // Prefill booker name
+                const bookerInput = document.getElementById('bookingBooker');
+                if (bookerInput) bookerInput.value = userId || '';
+                // Set min date and time limits
+                const dateInput = document.getElementById('bookingDate');
+                const startInput = document.getElementById('bookingStartTime');
+                const endInput = document.getElementById('bookingEndTime');
+                if (dateInput) {
+                    dateInput.min = formatDateForInput(new Date());
+                }
+                // If opening for today, ensure time min is now
+                const todayStr = formatDateForInput(new Date());
+                if (dateInput && dateInput.value === todayStr && startInput) {
+                    startInput.min = formatTimeForInput(new Date());
+                    endInput.min = formatTimeForInput(new Date());
+                } else if (startInput) {
+                    startInput.min = '';
+                    endInput.min = '';
+                }
                 openModal('bookingModal');
             };
+
+            // Today button
+            const todayBtn = document.getElementById('todayBtn');
+            if (todayBtn) {
+                todayBtn.addEventListener('click', () => {
+                    currentBookingDate = new Date();
+                    reloadDataAndRender();
+                });
+            }
+
+            // Manage bookings search
+            const searchInput = document.getElementById('searchBookingInput');
+            if (searchInput) {
+                searchInput.addEventListener('input', (e) => {
+                    renderBookingsList(e.target.value.trim());
+                });
+            }
+
+            // Adjust time input minima when booking date changes
+            const bookingDateInput = document.getElementById('bookingDate');
+            if (bookingDateInput) {
+                bookingDateInput.addEventListener('change', (e) => {
+                    const startInput = document.getElementById('bookingStartTime');
+                    const endInput = document.getElementById('bookingEndTime');
+                    if (!startInput || !endInput) return;
+                    const todayStr = formatDateForInput(new Date());
+                    if (e.target.value === todayStr) {
+                        const now = new Date();
+                        startInput.min = formatTimeForInput(now);
+                        endInput.min = formatTimeForInput(now);
+                    } else {
+                        startInput.min = '';
+                        endInput.min = '';
+                    }
+                });
+            }
+
+            // Remove booking from Manage Bookings table (delegated)
+            const bookingsBody = document.getElementById('bookingsTableBody');
+            if (bookingsBody) {
+                bookingsBody.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.btn-remove-booking');
+                    if (!btn) return;
+                    const id = btn.dataset.id;
+                    const idx = allBookings.findIndex(x => x.id === id);
+                    if (idx === -1) return;
+                    const booking = allBookings[idx];
+                    const confirmMsg = `Remove booking for ${booking.resourceId} on ${new Date(booking.startTime).toLocaleDateString()} ${new Date(booking.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:false})}?`;
+                    if (!confirm(confirmMsg)) return;
+                    allBookings.splice(idx, 1);
+                    saveData();
+                    createLogEntry('Removed Booking', `${booking.resourceId} at ${formatTimestamp(booking.startTime)}`, booking.bookerId);
+                    showToast('Booking removed.');
+                    renderBookingsList(searchInput ? searchInput.value.trim() : '');
+                    reloadDataAndRender();
+                });
+            }
 
             // Booking Form Submit
             document.getElementById('bookingForm').onsubmit = (e) => {
@@ -329,15 +497,21 @@
                 const d = document.getElementById('bookingDate').value;
                 const sStr = document.getElementById('bookingStartTime').value;
                 const eStr = document.getElementById('bookingEndTime').value;
+                const booker = document.getElementById('bookingBooker') ? document.getElementById('bookingBooker').value.trim() : '';
                 
                 if (!sStr || !eStr) {
                     return showToast("Please select both start and end times.", true);
+                }
+                if (!booker) {
+                    return showToast("Please enter your name.", true);
                 }
                 
                 const start = new Date(d + 'T' + sStr);
                 const end = new Date(d + 'T' + eStr);
                 
                 if (end <= start) return showToast("End time must be after start time.", true);
+                // Prevent bookings in the past
+                if (start.getTime() < Date.now()) return showToast("Cannot create a booking in the past.", true);
                 
                 const startMs = start.getTime();
                 const endMs = end.getTime();
@@ -351,13 +525,13 @@
                     resourceId: resId, 
                     startTime: startMs, 
                     endTime: endMs, 
-                    bookerId: userId,
+                    bookerId: booker,
                     createdAt: new Date().toISOString(),
                     status: 'confirmed'
                 });
-                
+
                 saveData();
-                createLogEntry(`New Booking`, `${resId} for ${formatTimestamp(startMs)}`);
+                createLogEntry(`New Booking`, `${resId} for ${formatTimestamp(startMs)}`, booker);
                 showToast("Booking confirmed!");
                 closeModal();
                 reloadDataAndRender();

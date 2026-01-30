@@ -36,6 +36,12 @@
                     <span class="hidden md:block ml-4">Activity Logs</span>
                 </a>
             </li>
+            <li>
+                <a href="#manage" class="nav-link" data-page="manage">
+                    <span class="text-2xl">🔎</span>
+                    <span class="hidden md:block ml-4">Manage Bookings</span>
+                </a>
+            </li>
         </ul>
     </nav>
 
@@ -96,6 +102,7 @@
                     <button id="prevDayBtn" class="p-2 rounded-full hover:bg-slate-100 transition border border-slate-200">
                         <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
                     </button>
+                    <button id="todayBtn" class="p-2 rounded-md bg-slate-50 hover:bg-slate-100 transition border border-slate-200 text-sm">Today</button>
                     <h2 id="bookingDateDisplay" class="text-xl font-bold w-64 text-center text-indigo-900"></h2>
                     <button id="nextDayBtn" class="p-2 rounded-full hover:bg-slate-100 transition border border-slate-200">
                         <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
@@ -124,6 +131,37 @@
                         <tbody id="logsTableBody">
                             <tr>
                                 <td colspan="4" class="text-center p-8 text-slate-400 italic">No logs found.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Page: Manage Bookings -->
+            <div id="page-manage" class="page-content">
+                <div class="flex items-center justify-between mb-6">
+                    <h1 class="text-3xl font-bold text-slate-900">Manage Bookings</h1>
+                    <div class="w-full max-w-md">
+                        <label for="searchBookingInput" class="form-label">Search by name</label>
+                        <input id="searchBookingInput" type="search" class="form-input" placeholder="Enter booker name to filter...">
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="table-header">Resource</th>
+                                <th class="table-header">Date</th>
+                                <th class="table-header">Start</th>
+                                <th class="table-header">End</th>
+                                <th class="table-header">Booked By</th>
+                                <th class="table-header">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bookingsTableBody">
+                            <tr>
+                                <td colspan="5" class="text-center p-8 text-slate-400 italic">No bookings found.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -163,6 +201,10 @@
                     <label for="bookingEndTime" class="form-label">End Time</label>
                     <input type="time" id="bookingEndTime" class="form-input" required>
                 </div>
+            </div>
+            <div>
+                <label for="bookingBooker" class="form-label">Your Name</label>
+                <input type="text" id="bookingBooker" class="form-input" placeholder="Enter your name" required>
             </div>
             <div class="flex justify-end pt-6 space-x-3">
                 <button type="button" id="cancelBookingModalBtn" class="btn-secondary">Cancel</button>
