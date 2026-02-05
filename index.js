@@ -45,8 +45,127 @@
 
         function saveData() {
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ bookings: allBookings, logs: allLogs }));
+            // Best-effort push to Google Apps Script to store centrally
+            pushToGoogleSheet().catch(err => console.warn('Push to Google Sheet failed:', err));
         }
         
+        // --- SYNC HELPERS ---
+        const GOOGLE_SHEET_SYNC_URL = 'https://script.google.com/a/macros/motorolasolutions.com/s/AKfycbxFHwkHE9FSWDL35BAWOFz_rTVudORzJpF_hVqW8BleuAoiyaI1yhlqsN4n0OEzDIA/exec';
+
+        async function pushToGoogleSheet() {
+            try {
+                const res = await fetch(GOOGLE_SHEET_SYNC_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bookings: allBookings, logs: allLogs })
+                });
+                // Apps Script may not allow CORS; if response isn't ok we still consider request sent
+                if (!res.ok) {
+                    console.warn('Google Sheet push returned non-OK status', res.status);
+                }
+                return true;
+            } catch (e) {
+                console.warn('Push to Google Sheet failed', e);
+                return false;
+            }
+        }
+
+        async function pullFromGoogleSheet() {
+            try {
+                const res = await fetch(GOOGLE_SHEET_SYNC_URL);
+                if (!res.ok) {
+                    console.warn('Google Sheet pull failed with status', res.status);
+                    return false;
+                }
+                const data = await res.json();
+                if (data.bookings) {
+                    allBookings = data.bookings.map(b => ({ ...b, startTime: Number(b.startTime), endTime: Number(b.endTime) }));
+                }
+                if (data.logs) {
+                    allLogs = data.logs.map(l => ({ ...l, timestamp: Number(l.timestamp) }));
+                }
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ bookings: allBookings, logs: allLogs }));
+                return true;
+            } catch (e) {
+                console.warn('Pull from Google Sheet failed', e);
+                return false;
+            }
+        }
+
+        // Sync helper: push then pull and refresh UI
+        async function syncAfterUpdate() {
+            try {
+                await pushToGoogleSheet();
+                await pullFromGoogleSheet();
+                loadData();
+                cleanupExpiredBookings();
+                reloadDataAndRender();
+                showToast('Synced with Google Sheet');
+                return true;
+            } catch (e) {
+                console.warn('syncAfterUpdate failed', e);
+                showToast('Sync failed', true);
+                return false;
+            }
+        }
+
+        // --- CLEANUP EXPIRED BOOKINGS ---
+        function cleanupExpiredBookings() {
+            const nowMs = Date.now();
+            const expired = allBookings.filter(b => (b.endTime || 0) <= nowMs);
+            if (!expired || expired.length === 0) return;
+
+            allBookings = allBookings.filter(b => (b.endTime || 0) > nowMs);
+
+            const details = expired.slice(0, 10).map(b => `${b.resourceId} @ ${formatTimestamp(b.endTime)}`).join('; ');
+            const summary = `${expired.length} expired booking(s) removed${expired.length > 10 ? ' (showing first 10)' : ''}: ${details}`;
+            allLogs.unshift({ id: 'log-' + Date.now(), timestamp: Date.now(), userId: 'system', activityType: 'Expired bookings removed', details: summary });
+
+            saveData();
+            // push changes and pull latest
+            syncAfterUpdate().catch(() => {});
+        }
+
+        // --- AUTO POLLING ---
+        // Starts periodic polling to pull updates from the shared Google Sheet
+        function setupAutoPolling(intervalMs = 60000) {
+            if (window.__bookingAutoPoll) return; // already running
+            window.__bookingAutoPoll = true;
+            window.__bookingAutoPollTimer = setInterval(async () => {
+                if (window.__bookingAutoSyncing) return;
+                window.__bookingAutoSyncing = true;
+                try {
+                    const prevState = JSON.stringify({ b: allBookings, l: allLogs });
+                    const ok = await pullFromGoogleSheet();
+                    if (ok) {
+                        const newState = JSON.stringify({ b: allBookings, l: allLogs });
+                        if (newState !== prevState) {
+                            cleanupExpiredBookings();
+                            reloadDataAndRender();
+                            const statusEl = document.getElementById('syncStatus');
+                            if (statusEl) {
+                                statusEl.classList.remove('hidden');
+                                statusEl.textContent = 'Auto-synced';
+                                setTimeout(() => { statusEl.classList.add('hidden'); }, 3000);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Auto-polling error', e);
+                } finally {
+                    window.__bookingAutoSyncing = false;
+                }
+            }, intervalMs);
+        }
+
+        function stopAutoPolling() {
+            if (window.__bookingAutoPollTimer) {
+                clearInterval(window.__bookingAutoPollTimer);
+                window.__bookingAutoPollTimer = null;
+                window.__bookingAutoPoll = false;
+            }
+        }
+
         function reloadDataAndRender() {
             loadData();
             allBookings.sort((a, b) => a.startTime - b.startTime);
@@ -89,13 +208,32 @@
             return `${hours}:${minutes}`;
         }
 
+        // Toast timeout handle (shared so repeated toasts clear the previous hide timer)
+        let _toastTimeout = null;
         function showToast(message, isError = false) {
             const toast = document.getElementById('toast');
             const toastMessage = document.getElementById('toastMessage');
+            if (!toast || !toastMessage) return;
+
+            // Clear any pending hide timers so this toast's timeout is authoritative
+            if (_toastTimeout) {
+                clearTimeout(_toastTimeout);
+                _toastTimeout = null;
+            }
+
+            // Update content and styles
             toastMessage.textContent = message;
+            // Keep base classes and avoid overwriting utility classes used for show/hide
             toast.className = `fixed bottom-10 right-10 ${isError ? 'bg-red-600' : 'bg-slate-900'} text-white py-3 px-6 rounded-lg shadow-xl transform transition-transform duration-300 ease-out z-50`;
+            // Ensure visible state
             toast.classList.remove('translate-x-full');
-            setTimeout(() => toast.classList.add('translate-x-full'), 3000);
+
+            // Hide after a duration (longer for errors)
+            const hideAfter = isError ? 6000 : 3000;
+            _toastTimeout = setTimeout(() => {
+                toast.classList.add('translate-x-full');
+                _toastTimeout = null;
+            }, hideAfter);
         }
 
         function openModal(modalId) {
@@ -390,6 +528,8 @@
                     saveData();
                     showToast("Booking updated.");
                     reloadDataAndRender();
+                    // Attempt to sync changes immediately
+                    syncAfterUpdate().catch(() => {});
                 }
             });
         }
@@ -450,6 +590,36 @@
                 });
             }
 
+            // Sync now button
+            const syncBtn = document.getElementById('syncBtn');
+            const syncStatus = document.getElementById('syncStatus');
+            if (syncBtn) {
+                syncBtn.addEventListener('click', async () => {
+                    syncBtn.disabled = true;
+                    if (syncStatus) { syncStatus.classList.remove('hidden'); syncStatus.textContent = 'Syncing...'; }
+                    const pushOk = await pushToGoogleSheet();
+                    const pullOk = await pullFromGoogleSheet();
+                    loadData();
+                    cleanupExpiredBookings();
+                    reloadDataAndRender();
+                    if (pushOk && pullOk) {
+                        showToast('Sync complete!');
+                        if (syncStatus) syncStatus.textContent = 'Synced just now';
+                    } else if (pushOk) {
+                        showToast('Push succeeded; pull failed (see console)', true);
+                        if (syncStatus) syncStatus.textContent = 'Push succeeded';
+                    } else if (pullOk) {
+                        showToast('Pulled latest bookings from sheet');
+                        if (syncStatus) syncStatus.textContent = 'Pulled just now';
+                    } else {
+                        showToast('Sync failed. Check console for details.', true);
+                        if (syncStatus) syncStatus.textContent = 'Sync failed';
+                    }
+                    setTimeout(() => { if (syncStatus) syncStatus.classList.add('hidden'); }, 5000);
+                    syncBtn.disabled = false;
+                });
+            }
+
             // Adjust time input minima when booking date changes
             const bookingDateInput = document.getElementById('bookingDate');
             if (bookingDateInput) {
@@ -487,6 +657,8 @@
                     showToast('Booking removed.');
                     renderBookingsList(searchInput ? searchInput.value.trim() : '');
                     reloadDataAndRender();
+                    // Sync the deletion to Google Sheet
+                    syncAfterUpdate().catch(() => {});
                 });
             }
 
@@ -535,6 +707,8 @@
                 showToast("Booking confirmed!");
                 closeModal();
                 reloadDataAndRender();
+                // Immediately sync new booking to shared sheet
+                syncAfterUpdate().catch(() => {});
             };
 
             // Day Navigation
@@ -549,10 +723,19 @@
         }
 
         // --- INIT ---
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                await pullFromGoogleSheet();
+            } catch (e) {
+                console.warn('Initial sheet pull failed:', e);
+            }
+
             loadData();
             setupNavigation();
             setupEventListeners();
             setupDelegatedListeners();
             reloadDataAndRender();
+
+            // Start automatic polling every 1 minute
+            setupAutoPolling(60 * 1000);
         });
