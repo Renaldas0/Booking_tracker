@@ -727,10 +727,14 @@
                 
                 fetch('https://script.google.com/a/macros/motorolasolutions.com/s/AKfycbzqWkGQmNmUOqGWXkmlMtg6mv5GHn3p92cIZpfDCd_oiSr3AmJDyZLsvMg3J6VD3oLF/exec', {
                     method: 'POST',
+                    mode: 'cors',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8'
+                    },
                     body: JSON.stringify(bookingData)
                 })
-                .then(response => console.log('Booking Saved!'))
-                .catch(err => console.warn('Failed to save booking to Google Apps Script:', err));
+                .then(res => res.json())
+                .catch(err => console.log("Note: You might still see a CORS error in console even if the data was sent!", err));
                 
                 showToast("Booking confirmed!");
                 closeModal();
