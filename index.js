@@ -727,9 +727,9 @@
                 
                 fetch('https://script.google.com/a/macros/motorolasolutions.com/s/AKfycbzqWkGQmNmUOqGWXkmlMtg6mv5GHn3p92cIZpfDCd_oiSr3AmJDyZLsvMg3J6VD3oLF/exec', {
                     method: 'POST',
-                    mode: 'cors',
+                    mode: 'no-cors',
                     headers: {
-                        'Content-Type': 'text/plain;charset=utf-8'
+                        'Content-Type': 'application/json',
                     },
                     body: JSON.stringify(bookingData)
                 })
