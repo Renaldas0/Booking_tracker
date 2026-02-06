@@ -6,11 +6,6 @@
             { id: 'PC-4', name: 'TYPE 2 NM CLIENT', group: 'PC' },
             { id: 'PC-5', name: 'TYPE 2 KMF CLIENT', group: 'PC' },
             { id: 'PC-6', name: 'TYPE 2 DISPATCH', group: 'PC' },
-            { id: 'Laptop-1', name: 'FG Laptop 1', group: 'Laptop' },
-            { id: 'Laptop-2', name: 'FG Laptop 2', group: 'Laptop' },
-            { id: 'Laptop-3', name: 'FG Laptop 3', group: 'Laptop' },
-            { id: 'Laptop-4', name: 'FG Laptop 4', group: 'Laptop' }, 
-            { id: 'Laptop-4', name: 'FG Laptop 5', group: 'Laptop' }, 
             { id: 'MCH-Mobile', name: 'Multi Control Head Mobile', group: 'Mobile' }, 
         ];
 
@@ -331,8 +326,9 @@
         function renderDashboardStats() {
             const now = new Date();
             const pcGrid = document.getElementById('pc-stats-grid');
-            const laptopGrid = document.getElementById('laptop-stats-grid');
-            pcGrid.innerHTML = ''; laptopGrid.innerHTML = '';
+            const mobileGrid = document.getElementById('mobile-stats-grid');
+            pcGrid.innerHTML = '';
+            mobileGrid.innerHTML = '';
 
             RESOURCES.forEach(res => {
                 const card = document.createElement('div');
@@ -356,14 +352,17 @@
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-4">
                         <h3 class="font-bold text-slate-800">${res.name}</h3>
-                        <span class="text-xl">${res.group === 'PC' ? '🖥️' : '💻'}</span>
+                        <span class="text-xl">${res.group === 'PC' ? '🖥️' : '📡'}</span>
                     </div>
                     <p class="text-xl font-bold ${statusClass}">${statusText}</p>
                     <p class="text-xs text-slate-500 mt-1">${nextText}</p>
                 `;
                 
-                if (res.group === 'PC') pcGrid.appendChild(card);
-                else laptopGrid.appendChild(card);
+                if (res.group === 'PC') {
+                    pcGrid.appendChild(card);
+                } else if (res.group === 'Mobile') {
+                    mobileGrid.appendChild(card);
+                }
             });
 
             const activityList = document.getElementById('recent-activity-list');
@@ -685,6 +684,16 @@
                 // Prevent bookings in the past
                 if (start.getTime() < Date.now()) return showToast("Cannot create a booking in the past.", true);
                 
+                // Validate selected date is not in the past
+                const selectedDate = new Date(d);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                selectedDate.setHours(0, 0, 0, 0);
+                
+                if (selectedDate < today) {
+                    return showToast("Error: Cannot book in the past", true);
+                }
+                
                 const startMs = start.getTime();
                 const endMs = end.getTime();
                 
@@ -704,6 +713,25 @@
 
                 saveData();
                 createLogEntry(`New Booking`, `${resId} for ${formatTimestamp(startMs)}`, booker);
+                
+                // Send booking to Google Apps Script
+                const res = RESOURCES.find(r => r.id === resId);
+                const bookingData = {
+                    bookingId: 'B-' + Date.now(),
+                    pcName: res ? res.name : resId,
+                    date: formatDateForInput(start),
+                    startTime: formatTimeForInput(start),
+                    endTime: formatTimeForInput(end),
+                    userName: booker
+                };
+                
+                fetch('https://script.google.com/a/macros/motorolasolutions.com/s/AKfycbzqWkGQmNmUOqGWXkmlMtg6mv5GHn3p92cIZpfDCd_oiSr3AmJDyZLsvMg3J6VD3oLF/exec', {
+                    method: 'POST',
+                    body: JSON.stringify(bookingData)
+                })
+                .then(response => console.log('Booking Saved!'))
+                .catch(err => console.warn('Failed to save booking to Google Apps Script:', err));
+                
                 showToast("Booking confirmed!");
                 closeModal();
                 reloadDataAndRender();
