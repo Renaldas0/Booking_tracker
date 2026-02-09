@@ -456,9 +456,14 @@
                     const hr = parseInt(target.dataset.time);
                     const start = new Date(currentBookingDate); start.setHours(hr, 0, 0, 0);
                     const end = new Date(currentBookingDate); end.setHours(hr + 1, 0, 0, 0);
-                    // Prevent opening modal for past slots
-                    if (start.getTime() < Date.now()) {
-                        showToast('Cannot create bookings in the past.', true);
+                    // Allow current hour, prevent only past hours
+                    const now = new Date();
+                    const bookingDate = new Date(currentBookingDate);
+                    bookingDate.setHours(0, 0, 0, 0);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    if (bookingDate.getTime() === today.getTime() && hr < now.getHours()) {
+                        showToast('Cannot book hours in the past.', true);
                         return;
                     }
                     
@@ -681,8 +686,6 @@
                 const end = new Date(d + 'T' + eStr);
                 
                 if (end <= start) return showToast("End time must be after start time.", true);
-                // Prevent bookings in the past
-                if (start.getTime() < Date.now()) return showToast("Cannot create a booking in the past.", true);
                 
                 // Validate selected date is not in the past
                 const selectedDate = new Date(d);
@@ -692,6 +695,12 @@
                 
                 if (selectedDate < today) {
                     return showToast("Error: Cannot book in the past", true);
+                }
+                
+                // Allow current hour, prevent only past hours
+                const now = new Date();
+                if (selectedDate.getTime() === today.getTime() && start.getHours() < now.getHours()) {
+                    return showToast("Cannot book hours in the past.", true);
                 }
                 
                 const startMs = start.getTime();
