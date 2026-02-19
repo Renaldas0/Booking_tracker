@@ -28,20 +28,46 @@
         const activeNavStyles = "bg-indigo-50 text-indigo-600 border-indigo-500 active-nav";
         const inactiveNavStyles = "text-slate-500 hover:bg-slate-50 hover:text-slate-800 border-transparent";
         
-        // --- PERSISTENCE ---
-        function loadData() {
-            const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
-            if (storedData) {
-                const data = JSON.parse(storedData);
+
+        // --- GOOGLE APPS SCRIPT API INTEGRATION ---
+        const APPS_SCRIPT_URL = 'https://script.google.com/a/macros/motorolasolutions.com/s/AKfycbwJ5afGQZNgQK0VgwbpMDkNFilPq7rubSFQ8F-BAPofM4SIwThTMiw-5ecm2yFCR1nSWQ/exec';
+
+        // Load bookings and logs from Apps Script (Excel backend)
+        async function loadData() {
+            try {
+                const res = await fetch(APPS_SCRIPT_URL);
+                if (!res.ok) throw new Error('Failed to fetch data from Apps Script');
+                const data = await res.json();
                 allBookings = data.bookings || [];
                 allLogs = data.logs || [];
+            } catch (e) {
+                // fallback to localStorage if Apps Script fails
+                const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (storedData) {
+                    const data = JSON.parse(storedData);
+                    allBookings = data.bookings || [];
+                    allLogs = data.logs || [];
+                } else {
+                    allBookings = [];
+                    allLogs = [];
+                }
+                console.warn('Apps Script fetch failed, using localStorage:', e);
             }
         }
 
-        function saveData() {
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ bookings: allBookings, logs: allLogs }));
-            // Best-effort push to Google Apps Script to store centrally
-            pushToGoogleSheet().catch(err => console.warn('Push to Google Sheet failed:', err));
+        // Save bookings and logs to Apps Script (Excel backend)
+        async function saveData() {
+            try {
+                await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bookings: allBookings, logs: allLogs })
+                });
+            } catch (e) {
+                // fallback to localStorage if Apps Script fails
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ bookings: allBookings, logs: allLogs }));
+                console.warn('Apps Script save failed, using localStorage:', e);
+            }
         }
         
         // --- SYNC HELPERS ---
@@ -64,6 +90,18 @@
                 return false;
             }
         }
+
+        async function syncAfterUpdate() {
+    showToast("Syncing...");
+    const pushed = await pushToGoogleSheet();
+    if (pushed) {
+        await pullFromGoogleSheet();
+        reloadDataAndRender();
+        showToast("Synced successfully");
+    } else {
+        showToast("Sync failed - saved locally", true);
+    }
+}
 
         async function pullFromGoogleSheet() {
             try {
@@ -764,19 +802,14 @@
         }
 
         // --- INIT ---
-        document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                await pullFromGoogleSheet();
-            } catch (e) {
-                console.warn('Initial sheet pull failed:', e);
-            }
-
-            loadData();
-            setupNavigation();
-            setupEventListeners();
-            setupDelegatedListeners();
-            reloadDataAndRender();
-
-            // Start automatic polling every 1 minute
-            setupAutoPolling(60 * 1000);
+        document.addEventListener('DOMContentLoaded', () => {
+            (async () => {
+                await loadData();
+                setupNavigation();
+                setupEventListeners();
+                setupDelegatedListeners();
+                reloadDataAndRender();
+                // Start automatic polling every 1 minute
+                setupAutoPolling(60 * 1000);
+            })();
         });
